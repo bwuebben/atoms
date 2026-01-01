@@ -318,8 +318,8 @@ Key improvements from S-ATOMS:
 
 ## License
 
-[Specify license here]
+Copyright © 2025 Bernd J. Wuebben. All Rights Reserved.
 
 ## Contact
 
-[Contact information]
+Bernd J. Wuebben <wuebben@gmail.com>
