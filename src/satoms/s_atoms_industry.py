@@ -42,6 +42,171 @@ from s_atoms import (
 # Data Generation and Loading
 # =============================================================================
 
+def load_industry_returns(
+    filepath: str = None,
+    start_date: str = '1990-01',
+    end_date: str = None
+) -> Tuple[pd.DataFrame, List[int]]:
+    """
+    Load industry portfolio returns from data/processed/ or generate synthetic.
+
+    If filepath is None, tries to load from data/processed/industry_returns.csv first,
+    otherwise generates synthetic data for demonstration.
+
+    Parameters
+    ----------
+    filepath : str, optional
+        Path to CSV file with industry returns
+    start_date, end_date : str, optional
+        Date range in 'YYYY-MM' format
+
+    Returns
+    -------
+    returns_df : pd.DataFrame
+        Industry returns with DatetimeIndex
+    recession_periods : list
+        Indices of recession periods
+    """
+    # Try default processed data location first
+    if filepath is None:
+        # Look for data relative to project root
+        possible_paths = [
+            '../../data/processed/industry_returns.csv',  # From src/satoms/
+            'data/processed/industry_returns.csv',         # From project root
+            os.path.join('..', '..', 'data', 'processed', 'industry_returns.csv')
+        ]
+
+        for path in possible_paths:
+            if os.path.exists(path):
+                filepath = path
+                break
+
+    if filepath is not None and os.path.exists(filepath):
+        try:
+            df = pd.read_csv(filepath, index_col=0, parse_dates=True)
+            if end_date:
+                df = df.loc[start_date:end_date]
+            else:
+                df = df.loc[start_date:]
+
+            print(f"   Loaded real industry returns from: {filepath}")
+            print(f"   Date range: {df.index[0]} to {df.index[-1]}")
+            print(f"   Industries: {len(df.columns)}")
+
+            # Try to load recession data
+            recession_periods = []
+            recession_path = filepath.replace('industry_returns.csv', 'recessions.csv')
+            if os.path.exists(recession_path):
+                rec_df = pd.read_csv(recession_path)
+                if 'period' in rec_df.columns:
+                    recession_periods = rec_df['period'].tolist()
+                    print(f"   Loaded {len(recession_periods)} recession periods")
+
+            return df, recession_periods
+
+        except Exception as e:
+            print(f"   Could not load {filepath}: {e}")
+            print("   Generating synthetic data instead...")
+
+    # Generate synthetic data as fallback
+    print("   Generating synthetic industry returns...")
+    T = 350 if end_date is None else None
+    n_industries = 17
+
+    df, features_df, recession_periods = generate_regime_switching_industry_data(
+        T=T,
+        n_industries=n_industries,
+        n_features=20,
+        seed=42
+    )
+
+    return df, recession_periods
+
+
+def load_feature_data(
+    returns_df: pd.DataFrame,
+    filepath: str = None
+) -> pd.DataFrame:
+    """
+    Load feature/predictor data from data/processed/ or generate synthetic.
+
+    Parameters
+    ----------
+    returns_df : pd.DataFrame
+        Returns data (used for alignment and fallback generation)
+    filepath : str, optional
+        Path to CSV file with features
+
+    Returns
+    -------
+    features_df : pd.DataFrame
+        Feature matrix with DatetimeIndex matching returns_df
+    """
+    # Try default processed data location first
+    if filepath is None:
+        possible_paths = [
+            '../../data/processed/features.csv',
+            'data/processed/features.csv',
+            os.path.join('..', '..', 'data', 'processed', 'features.csv')
+        ]
+
+        for path in possible_paths:
+            if os.path.exists(path):
+                filepath = path
+                break
+
+    if filepath is not None and os.path.exists(filepath):
+        try:
+            df = pd.read_csv(filepath, index_col=0, parse_dates=True)
+            # Align with returns
+            common_idx = returns_df.index.intersection(df.index)
+            df = df.loc[common_idx]
+
+            print(f"   Loaded real features from: {filepath}")
+            print(f"   Features: {len(df.columns)}")
+            return df
+
+        except Exception as e:
+            print(f"   Could not load {filepath}: {e}")
+            print("   Generating synthetic features instead...")
+
+    # Generate synthetic features as fallback
+    print("   Generating synthetic features...")
+    T = len(returns_df)
+    n_features = 20
+
+    dates = returns_df.index
+
+    # Generate features
+    features = {}
+
+    # Market-like factors
+    market_returns = returns_df.mean(axis=1).values
+    features['MKT'] = market_returns
+    features['SMB'] = 0.3 * market_returns + 0.02 * np.random.randn(T)
+    features['HML'] = -0.1 * market_returns + 0.02 * np.random.randn(T)
+
+    # Momentum
+    momentum = np.zeros(T)
+    for t in range(12, T):
+        momentum[t] = np.mean(market_returns[t-12:t-1])
+    features['MOM'] = momentum
+
+    # Volatility
+    vol_factor = np.zeros(T)
+    for t in range(21, T):
+        vol_factor[t] = np.std(market_returns[t-21:t])
+    features['VOL'] = vol_factor
+
+    # Additional random features
+    for i in range(n_features - 5):
+        features[f'feature_{i}'] = np.random.randn(T) * 0.02
+
+    features_df = pd.DataFrame(features, index=dates)
+
+    return features_df
+
+
 def generate_regime_switching_industry_data(
     T: int = 350,
     n_industries: int = 17,
@@ -73,7 +238,7 @@ def generate_regime_switching_industry_data(
     ][:n_industries]
     
     # Create date index (monthly from 1990)
-    dates = pd.date_range(start='1990-01', periods=T, freq='M')
+    dates = pd.date_range(start='1990-01', periods=T, freq='ME')
     
     # Define regime parameters
     # Recession periods (mimicking NBER dates scaled to our sample)
@@ -668,22 +833,18 @@ def main():
         return
     
     # Create output directory
-    output_dir = '/home/claude/satoms_results'
+    output_dir = 'satoms_results'
     os.makedirs(output_dir, exist_ok=True)
     
-    # 1. Generate/Load Data
-    print("\n1. Generating synthetic industry portfolio data...")
-    returns_df, features_df, recession_periods = generate_regime_switching_industry_data(
-        T=200,  # 200 months (~17 years)
-        n_industries=10,  # Reduced for faster demo
-        n_features=15,
-        seed=42
-    )
-    
+    # 1. Load Data (tries data/processed/ first, falls back to synthetic)
+    print("\n1. Loading industry portfolio data...")
+    returns_df, recession_periods = load_industry_returns()
+    features_df = load_feature_data(returns_df)
+
     print(f"   Sample period: {returns_df.index[0]} to {returns_df.index[-1]}")
     print(f"   Industries: {len(returns_df.columns)}")
     print(f"   Features: {features_df.shape[1]}")
-    print(f"   Recession periods: {len(recession_periods)} months")
+    print(f"   Recession periods: {len(recession_periods)} periods")
     
     # 2. Run Analysis
     print("\n2. Running S-ATOMS analysis...")
