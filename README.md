@@ -309,7 +309,7 @@ Key improvements from S-ATOMS:
 ```bibtex
 @article{wuebben2025history,
   title={When History Rhymes: Ensemble Learning and Regime-Aware Estimation under Nonstationarity},
-  author={Wuebben, [First Name]},
+  author={Wuebben, Bernd},
   year={2025}
 }
 ```
