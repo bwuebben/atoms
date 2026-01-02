@@ -413,6 +413,8 @@ def run_full_industry_analysis(
         train_data, val_data = prepare_validation_data(
             returns_df, features_df, industry
         )
+
+        print("Done preparing validation data.")
         
         # Run each method
         for method_name, use_sim, use_ens in [
@@ -421,13 +423,16 @@ def run_full_industry_analysis(
             ('S-ATOMS (no sim)', False, True),
             ('S-ATOMS (no ens)', True, False),
         ]:
+            
+            print("Running method:", method_name)
+
             selector = IndustrySATOMS(
                 M=0.1,
                 gamma='adaptive' if use_ens else 100.0,
                 use_similarity=use_sim,
                 use_soft_ensemble=use_ens,
                 use_empirical_proxies=True,
-                verbose=False
+                verbose=True
             )
             
             try:
